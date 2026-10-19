@@ -1,0 +1,9 @@
+{
+  "name": "tablet-div",
+  "version": "1.0.0",
+  "description": "平板直式除法點選練習（靜態網頁，無建置工具）",
+  "private": true,
+  "scripts": {
+    "test": "node test/generator.test.js"
+  }
+}

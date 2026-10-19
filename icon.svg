@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#c5dceb" stroke-width="3"/>
+    </pattern>
+  </defs>
+  <rect width="512" height="512" fill="#e8f3fb"/>
+  <rect width="512" height="512" fill="url(#grid)"/>
+  <!-- 貼紙卡片 -->
+  <rect x="80" y="80" width="368" height="368" rx="72" fill="#0b1f33"/>
+  <rect x="64" y="64" width="368" height="368" rx="72" fill="#0b1f33"/>
+  <rect x="82" y="82" width="332" height="332" rx="56" fill="#ffd45e"/>
+  <!-- ÷ -->
+  <circle cx="248" cy="158" r="34" fill="#0b1f33"/>
+  <rect x="136" y="228" width="224" height="40" rx="20" fill="#0b1f33"/>
+  <circle cx="248" cy="338" r="34" fill="#0b1f33"/>
+</svg>

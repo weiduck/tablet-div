@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#e8f3fb" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="直式除法" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>直式除法練習</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@600;700;900&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <section id="panelPractice" class="panel" aria-label="練習">
+      <nav class="deck-jump" aria-label="跳到題型">
+        <div class="deck-jump-list" id="levelList" role="listbox" aria-label="題型清單"></div>
+      </nav>
+
+      <div class="card">
+        <div class="card-top">
+          <div class="problem-row">
+            <div class="problem-pill" id="problemPill">245 ÷ 8 = ?</div>
+            <button type="button" class="refresh-btn" id="refreshBtn" aria-label="換一題" title="換一題">↻</button>
+            <div class="seg" id="modeSeg" role="radiogroup" aria-label="整除或有餘數"></div>
+            <button type="button" class="toggle-btn" id="verifyBtn" aria-pressed="false">驗算：關</button>
+          </div>
+        </div>
+
+        <div class="split" id="practiceSplit">
+          <div class="board-col">
+            <div class="board-wrap">
+              <p class="board-prompt" id="boardPrompt">估商：商寫在藍框</p>
+              <div class="board-area scroll-ok" id="boardArea">
+                <div class="board" id="board" aria-label="直式除法格線"></div>
+                <div class="check-area hidden" id="checkArea" aria-label="驗算"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-panel scroll-ok" id="stepPanel">
+            <div class="step-meta">
+              <span id="stepLabel">第 1 步，共 5 步</span>
+              <div class="progress-track" aria-hidden="true">
+                <div class="progress-fill" id="progressFill"></div>
+              </div>
+            </div>
+
+            <div id="stepActive">
+              <div class="question-box">
+                <div class="q-main">
+                  <p class="phase" id="phaseLabel">商·十位：估商</p>
+                  <p class="question" id="questionText">24 裡面有幾個 8？</p>
+                  <div class="feedback" id="feedback" role="status"></div>
+                </div>
+                <div class="keypad" id="keypad" role="group" aria-label="數字鍵"></div>
+                <div class="q-hint">
+                  <div class="hint-box" id="hintBox"></div>
+                  <button type="button" class="hint-btn" id="hintBtn">給我一個提示</button>
+                </div>
+              </div>
+            </div>
+
+            <div id="stepComplete" class="complete-panel hidden">
+              <p class="complete-kicker">直式完成</p>
+              <h3 class="complete-title" id="completeTitle">每個數字都放對位置</h3>
+              <div class="complete-sum" id="completeRem">餘數 5 比除數 8 小 ✓</div>
+              <div class="complete-eq" id="completeEq">245 ÷ 8 = 30 … 5</div>
+              <div class="complete-check hidden" id="completeCheck"></div>
+              <p class="complete-note" id="completeNote">
+                商對齊被除數的位值；不夠商就商 0 佔位。
+              </p>
+              <button type="button" class="primary-btn" id="againBtn">再練一次</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="footer-note" id="footerNote">每個題型會隨機出題。用數字鍵填藍框；點錯沒關係，可以再按一次。</p>
+    </section>
+  </div>
+  <script src="div-core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
