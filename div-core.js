@@ -1,6 +1,7 @@
 /**
  * 直式除法練習：純邏輯（不碰 DOM）
  * - 長除法計算、題型約束 checkLevel、隨機出題 generate、步驟引擎 buildSteps、驗算 buildCheckSteps
+ * - 每步三層提示 hints[0..2]；四選一 buildChoices（常見錯誤當誘答、附錯因回饋；rng 可注入，makeRng(seed) 可重現）
  * - UMD：瀏覽器 → window.DivCore；Node → require('./div-core.js')
  *
  * 版面規則（康軒直式除法）：
@@ -51,6 +52,26 @@
   function randInt(rng, lo, hi) {
     if (lo > hi) return null;
     return lo + Math.floor(rng() * (hi - lo + 1));
+  }
+
+  /** mulberry32：可重現的 [0, 1) 亂數（測試用；介面預設 Math.random） */
+  function makeRng(seed) {
+    let t = seed >>> 0;
+    return function () {
+      t = (t + 0x6d2b79f5) >>> 0;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function shuffle(arr, rng) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
   }
 
   function placeOf(width, col) {
@@ -377,6 +398,44 @@
     return `${q} × ${d} = ${q} × ${tens} + ${q} × ${ones} = ${q * tens} + ${q * ones} = ${q * d}`;
   }
 
+  // ---------- 三層提示（第 1 層只講概念、第 2 層算式、第 3 層才說寫幾） ----------
+  /** 第 1 層：估商的方法（不含數字） */
+  function quotientConcept(divisor, kind) {
+    if (kind === "whole-zero") {
+      return "先比一比被除數和除數哪個大；一個除數都分不到的時候，商是多少？";
+    }
+    if (kind === "zero") {
+      return "先比一比紅圈的數和除數哪個大。不夠商的時候，商的這一位也不能空著。";
+    }
+    if (divisor < 10) return "想除數的乘法表：找出乘起來最接近紅圈的數、又不超過它的那一個。";
+    if (divisor % 10 === 0) return "除數是整十：把除數和紅圈的數都看成「幾個十」，再想乘法。";
+    return "估商：把除數四捨五入看成整十來試；積比紅圈的數大就改小，相減後的差不比除數小就改大。";
+  }
+
+  /** 第 2 層：列出三個相鄰的乘積（含正解，但不說是哪一個） */
+  function quotientWork(partial, d, q) {
+    if (q === 0) return `${partial} 和 ${d} 比一比：${partial} 比 ${d} 小。`;
+    const start = Math.max(1, Math.min(7, q - 1 - (partial % 2)));
+    const list = [start, start + 1, start + 2].map((t) => `${d} × ${t} = ${d * t}`).join("、");
+    const ask = `哪一個最接近 ${partial}、又不超過 ${partial}？`;
+    if (d >= 10 && d % 10 !== 0) {
+      const rd = roundDivisor(d);
+      return `把 ${d} 看成 ${rd}，${partial} 裡面大約有幾個 ${rd}？再用 ${d} 檢查：${list}，${ask}`;
+    }
+    return `${list}，${ask}`;
+  }
+
+  /** 驗算第 2 層：除數 × 商 拆成 除數 × 商的每一位 */
+  function checkMulWork(d, Q) {
+    const parts = revDigits(Q)
+      .map((v, i) => v * Math.pow(10, i))
+      .filter((v) => v > 0)
+      .reverse();
+    if (parts.length <= 1) return `${d} × ${Q} = ${d * Q}。`;
+    const each = parts.map((v) => `${d} × ${v} = ${d * v}`).join("、");
+    return `${each}，${parts.map((v) => d * v).join(" + ")} = ${d * Q}。`;
+  }
+
   /** 答錯時的回饋（UI 直接顯示） */
   function feedbackFor(step, digit) {
     if (step.kind === "quotient") {
@@ -415,6 +474,252 @@
     return r === 0
       ? `${dividend} ÷ ${divisor} = ${q}`
       : `${dividend} ÷ ${divisor} = ${q} … ${r}`;
+  }
+
+  // ---------- 直式逐位計算（誘答用） ----------
+  /** 由右往左：index 0 = 個位 */
+  function revDigits(n) {
+    return digitsOf(n).reverse();
+  }
+
+  /**
+   * a × b 逐位：cols[k] = { sum, carryIn, value, digit, carryOnly }
+   * sum = 這一位的乘積和（不含進位）；carryOnly = 最左邊只剩進位的那一位
+   */
+  function mulColumns(a, b) {
+    const xa = revDigits(a);
+    const xb = revDigits(b);
+    const sums = [];
+    xa.forEach((u, i) =>
+      xb.forEach((v, j) => {
+        sums[i + j] = (sums[i + j] || 0) + u * v;
+      })
+    );
+    const cols = [];
+    let carry = 0;
+    sums.forEach((sum) => {
+      const value = sum + carry;
+      cols.push({ sum, carryIn: carry, value, digit: value % 10, carryOnly: false });
+      carry = Math.floor(value / 10);
+    });
+    while (carry > 0) {
+      cols.push({ sum: 0, carryIn: carry, value: carry, digit: carry % 10, carryOnly: true });
+      carry = Math.floor(carry / 10);
+    }
+    return cols;
+  }
+
+  /** a + b 逐位：cols[k] = { sum, carryIn, value, digit, carryOnly } */
+  function addColumns(a, b) {
+    const xa = revDigits(a);
+    const xb = revDigits(b);
+    const cols = [];
+    let carry = 0;
+    for (let k = 0; k < Math.max(xa.length, xb.length); k++) {
+      const sum = (xa[k] || 0) + (xb[k] || 0);
+      const value = sum + carry;
+      cols.push({ sum, carryIn: carry, value, digit: value % 10, carryOnly: false });
+      carry = Math.floor(value / 10);
+    }
+    if (carry) cols.push({ sum: 0, carryIn: carry, value: carry, digit: carry, carryOnly: true });
+    return cols;
+  }
+
+  /** a − b 逐位（a ≥ b）：cols[k] = { top, bottom, borrowIn, need, digit } */
+  function subColumns(a, b) {
+    const xa = revDigits(a);
+    const xb = revDigits(b);
+    const cols = [];
+    let borrow = 0;
+    xa.forEach((top, k) => {
+      const bottom = xb[k] || 0;
+      const borrowIn = borrow;
+      const need = top - borrowIn < bottom;
+      borrow = need ? 1 : 0;
+      cols.push({ top, bottom, borrowIn, need, digit: top - borrowIn + (need ? 10 : 0) - bottom });
+    });
+    return cols;
+  }
+
+  // ---------- 四選一（常見錯誤當誘答） ----------
+  const CHOICE_COUNT = 4;
+  const HINT_LEVELS = 3;
+
+  /** 估商的對錯說明（「太大了」／「太小了」） */
+  function judgeText(step, v) {
+    const d = step.divisor;
+    const p = v * d;
+    if (judgeQuotient(step.partial, d, v) === "big") {
+      return `太大了：積會比被除的數大（${v} × ${d} = ${p}，比 ${step.partial} 大）。`;
+    }
+    return `太小了：相減後的差會 ≥ 除數（${step.partial} − ${p} = ${step.partial - p}，沒有比 ${d} 小）。`;
+  }
+
+  /** 這一步那一位的逐位計算 */
+  function columnOf(step) {
+    const k = step.k;
+    if (step.kind === "product") return mulColumns(step.divisor, step.q)[k];
+    if (step.kind === "diff") return subColumns(step.partial, step.product)[k];
+    if (step.kind === "check-mul") return mulColumns(step.divisor, step.quotient)[k];
+    if (step.kind === "check-add") return addColumns(step.product, step.remainder)[k];
+    return null;
+  }
+
+  /** 錯誤類型 → 回饋文字（依步驟內容） */
+  function errorText(key, step, v) {
+    const col = columnOf(step) || {};
+    switch (key) {
+      // 商
+      case "big":
+      case "small":
+        return judgeText(step, v);
+      case "estimate":
+        return `把 ${step.divisor} 看成 ${roundDivisor(step.divisor)} 估出 ${v}，還要檢查。` + judgeText(step, v);
+      case "truncate":
+        return `只看除數的十位（把 ${step.divisor} 看成 ${Math.floor(step.divisor / 10) * 10}）估出 ${v}，還要檢查。` + judgeText(step, v);
+      case "first-digit":
+        return "只看了最高位就估商，要看紅圈的整個數。" + judgeText(step, v);
+      case "skip-zero":
+        return `這是下一位的商。${step.place}不夠商，要先商 0 佔位，不能跳過。`;
+      // 積、驗算的乘法與加法
+      case "forgot-carry":
+        return col.carryOnly
+          ? "好像忘了把右邊的進位加進去，這一位的進位會不一樣。"
+          : `好像忘了加進位 ${col.carryIn}。`;
+      case "carry-twice":
+        return "進位只要加一次喔。";
+      case "tens-digit":
+        return `這是${step.kind === "check-add" ? "加" : "乘"}出來的十位數字（要進位的那個），藍框要寫個位的數字。`;
+      case "neighbour":
+        return "這好像是隔壁那一位的數字，看藍框的位置再算一次。";
+      // 差
+      case "swap":
+        return `${col.top - col.borrowIn} 不夠減 ${col.bottom}，不能倒過來用 ${col.bottom} − ${col.top - col.borrowIn}；要向左邊借 1 當 10 再減。`;
+      case "zero-cant":
+        return "不夠減不是寫 0，要向左邊借 1 當 10 再減。";
+      case "borrow-not-reduced":
+        return `這一位已經被右邊借走 1，${col.top} 要先變成 ${col.top - 1} 再減。`;
+      case "no-subtract":
+        return "這是上面的數字，還要減掉下面積的數字喔。";
+      // 移下來
+      case "next-digit":
+        return "這是再下一位的數字；一次只移下來一位（紅圈那一位）。";
+      case "used-digit":
+        return "這一位已經用過了；要移下來的是紅圈那一位。";
+      case "zero":
+        return "不是寫 0，把紅圈那一位的數字照抄下來。";
+      case "quotient-digit":
+        return "這是上面的商；移下來的是被除數的數字。";
+      default:
+        return null;
+    }
+  }
+
+  /** 進位類錯誤（積、驗算乘法、驗算加法共用） */
+  function carryCandidates(cols, k, add) {
+    const c = cols[k];
+    if (!c) return;
+    if (c.carryOnly) {
+      const prev = cols[k - 1];
+      if (prev && prev.carryIn) add(Math.floor(prev.sum / 10) % 10, "forgot-carry");
+    } else {
+      if (c.carryIn) add(c.sum % 10, "forgot-carry");
+      if (c.value >= 10) add(Math.floor(c.value / 10) % 10, "tens-digit");
+      if (c.carryIn) add((c.sum + 2 * c.carryIn) % 10, "carry-twice");
+    }
+  }
+
+  function neighbourCandidates(n, k, add) {
+    const xs = revDigits(n);
+    if (k - 1 >= 0) add(xs[k - 1], "neighbour");
+    if (k + 1 < xs.length) add(xs[k + 1], "neighbour");
+  }
+
+  /** 依步驟算出「常見錯誤」候選（依優先順序；可能重複或等於正解，之後再篩） */
+  function errorCandidates(step) {
+    const out = [];
+    const add = (value, key) => {
+      if (Number.isInteger(value) && value >= 0 && value <= 9) out.push({ value, key });
+    };
+    const q = step.expected;
+    const d = step.divisor;
+    const k = step.k;
+
+    if (step.kind === "quotient") {
+      const firstOf = (n) => digitsOf(n)[0];
+      if (q === 0 && step.nextQ) add(step.nextQ, "skip-zero");
+      if (d >= 10 && d % 10 !== 0) {
+        add(Math.min(9, Math.floor(step.partial / roundDivisor(d))), "estimate");
+      }
+      add(q + 1, "big");
+      add(q - 1, "small");
+      if (step.lead) add(Math.min(9, Math.floor(step.firstDigit / firstOf(d))), "first-digit");
+      if (d >= 10 && d % 10 !== 0) {
+        const head = String(step.partial).slice(0, Math.max(1, lenOf(step.partial) - 1));
+        add(Math.min(9, Math.floor(Number(head) / firstOf(d))), "truncate");
+      }
+    } else if (step.kind === "product") {
+      carryCandidates(mulColumns(d, step.q), k, add);
+      neighbourCandidates(step.product, k, add);
+    } else if (step.kind === "diff") {
+      const c = columnOf(step);
+      if (c.need) {
+        add(Math.abs(c.top - c.borrowIn - c.bottom), "swap");
+        add(0, "zero-cant");
+      }
+      if (c.borrowIn) add((c.top - c.bottom + (c.need ? 10 : 0)) % 10, "borrow-not-reduced");
+      neighbourCandidates(step.diff, k, add);
+      if (c.bottom) add(c.top - c.borrowIn, "no-subtract");
+    } else if (step.kind === "bring") {
+      const ds = step.digits;
+      add(ds[step.col + 1], "next-digit");
+      add(ds[step.col - 1], "used-digit");
+      add(0, "zero");
+      if (step.prevQ !== undefined) add(step.prevQ, "quotient-digit");
+      for (let j = step.col - 2; j >= 0; j--) add(ds[j], "used-digit");
+    } else if (step.kind === "check-mul") {
+      carryCandidates(mulColumns(d, step.quotient), k, add);
+      neighbourCandidates(d * step.quotient, k, add);
+    } else if (step.kind === "check-add") {
+      carryCandidates(addColumns(step.product, step.remainder), k, add);
+      neighbourCandidates(step.product + step.remainder, k, add);
+    }
+    return out;
+  }
+
+  /**
+   * 四選一：正解＋最多 3 個常見錯誤；不夠才用 ±1、9−x、±2、隨機補。
+   * 回傳 { values: 四個不同的 0–9（已洗牌）, why: { 錯的數字: 回饋文字 }, tags: { 錯的數字: 錯誤類型 } }
+   */
+  function buildChoices(step, rng) {
+    rng = rng || Math.random;
+    const correct = step.expected;
+    const picked = [correct];
+    const why = {};
+    const tags = {};
+    errorCandidates(step).forEach(({ value, key }) => {
+      if (picked.length >= CHOICE_COUNT || picked.includes(value)) return;
+      picked.push(value);
+      tags[value] = key;
+      const text = errorText(key, step, value);
+      if (text) why[value] = text;
+    });
+    const fillers = [correct - 1, correct + 1, 9 - correct, correct - 2, correct + 2]
+      .map((x) => ((x % 10) + 10) % 10);
+    for (const n of fillers) {
+      if (picked.length >= CHOICE_COUNT) break;
+      if (!picked.includes(n)) picked.push(n);
+    }
+    while (picked.length < CHOICE_COUNT) {
+      const n = Math.floor(rng() * 10);
+      if (!picked.includes(n)) picked.push(n);
+    }
+    return { values: shuffle(picked, rng), why, tags };
+  }
+
+  /** 只要四個選項 */
+  function makeChoices(step, rng) {
+    return buildChoices(step, rng).values;
   }
 
   // ---------- 步驟引擎 ----------
@@ -497,6 +802,11 @@
         }
         qHint = lead + estimateHint(partial, divisor, q);
       }
+      const leadConcept =
+        bi === 0 && ld.qStart > 0 && !wholeZero
+          ? "被除數最高位不夠除時，那裡不寫商，要連下一位一起看。"
+          : "";
+      const nextBlock = ld.blocks.slice(bi + 1).find((nb) => nb.q > 0);
       addStep({
         kind: "quotient",
         row: qRow,
@@ -504,10 +814,20 @@
         expected: q,
         partial,
         divisor,
+        place: place(col),
+        lead: bi === 0,
+        firstDigit: ds[0],
+        nextQ: q === 0 && nextBlock ? nextBlock.q : null,
         phase: `商·${place(col)}：估商`,
         prompt: "估商：商寫在藍框",
         question: qQuestion,
         hint: qHint,
+        hints: [
+          leadConcept +
+            quotientConcept(divisor, wholeZero ? "whole-zero" : q === 0 ? "zero" : "normal"),
+          quotientWork(partial, divisor, q),
+          qHint,
+        ],
         okText: `答對了！商 ${q}。`,
         highlights: partialCells.concat(divisorCells),
       });
@@ -520,25 +840,34 @@
         for (let k = 0; k < pd.length; k++) {
           const c = col - k;
           const digit = pd[pd.length - 1 - k];
+          const pHint =
+            mulBreakdown(q, divisor) +
+            "。" +
+            (k === 0 ? `積的最右邊要對齊商（${place(col)}），` : "") +
+            `這格寫 ${digit}。`;
           addStep({
             kind: "product",
             row: pRow,
             col: c,
+            k,
             expected: digit,
             q,
             divisor,
             product,
+            hints: [
+              divisor >= 10 && divisor % 10 === 0
+                ? "除數是整十：先用商乘除數十位上的數字，最後補一個零；積的最右邊對齊商。"
+                : "商 × 除數：從個位開始乘，積的最右邊對齊商；乘出來滿十要進位，加到左邊那一位。",
+              mulBreakdown(q, divisor) + "。",
+              pHint,
+            ],
             phase: `積·${place(c)}：商 × 除數`,
             prompt: "商 × 除數，積從右往左寫",
             question:
               k === 0
                 ? `商 ${q} × 除數 ${divisor} = ？先寫最右邊（${place(c)}）。`
                 : `${q} × ${divisor} = ？${place(c)}寫幾？`,
-            hint:
-              mulBreakdown(q, divisor) +
-              "。" +
-              (k === 0 ? `積的最右邊要對齊商（${place(col)}），` : "") +
-              `這格寫 ${digit}。`,
+            hint: pHint,
             highlights: [{ row: qRow, col }].concat(divisorCells),
           });
         }
@@ -561,9 +890,14 @@
             const need = top - borrowIn < bottom;
             borrow = need ? 1 : 0;
             let note = "";
-            if (borrowIn) note += `這一位被右邊借走 1，${top} 變成 ${top - 1}。`;
+            let work = `${partial} − ${product} = ${diff}。`;
+            if (borrowIn) {
+              note += `這一位被右邊借走 1，${top} 變成 ${top - 1}。`;
+              work += `${place(c)}被右邊借走 1。`;
+            }
             if (need) {
               note += `${top - borrowIn} 不夠減 ${bottom}，向左邊借 1，變成 ${top - borrowIn + 10} − ${bottom} = ${digit}。`;
+              work += `${place(c)}不夠減，要向左邊借 1 當 10。`;
             }
             const isLastDigit = k === dd.length - 1;
             let tail = "";
@@ -574,10 +908,12 @@
                   : `差 ${diff} 比除數 ${divisor} 小，表示商 ${q} 是對的。` +
                     (dd.length < pa.length ? "左邊不用寫 0。" : "");
             }
+            const fHint = `${partial} − ${product} = ${diff}。${note}這格寫 ${digit}。${tail}`;
             addStep({
               kind: "diff",
               row: fRow,
               col: c,
+              k,
               expected: digit,
               partial,
               product,
@@ -586,7 +922,12 @@
               phase: `差·${place(c)}：相減`,
               prompt: "相減，差從右往左寫",
               question: `${partial} − ${product} = ？${place(c)}寫幾？`,
-              hint: `${partial} − ${product} = ${diff}。${note}這格寫 ${digit}。${tail}`,
+              hint: fHint,
+              hints: [
+                "上面減下面，從個位開始一位一位減；不夠減就向左邊借一當十，被借走的那一位要少一。",
+                work,
+                fHint,
+              ],
               highlights: [
                 { row: curRow, col: c },
                 { row: pRow, col: c },
@@ -608,17 +949,25 @@
         const digit = ds[c];
         const newPartial = diff * 10 + digit;
         let hint;
+        let concept;
+        let work;
         if (prev.type === "zero") {
           hint =
             `上一步商 0（不夠商，商 0 佔位）。0 × ${divisor} = 0，` +
             `0 這一列不用寫、也不用減，直接把下一位 ${digit} 移下來，和 ${prev.partial} 合起來是 ${newPartial}。`;
+          concept = "上一步商零：零那一列不用寫、也不用減，直接把被除數的下一位移下來。";
+          work = `上面還是 ${prev.partial}；紅圈是被除數的${place(c)}，移下來接在 ${prev.partial} 的右邊。`;
         } else if (prev.type === "diffZero") {
           hint =
             `${prev.partial} − ${prev.product} = 0，剛好減完；0 不用寫，` +
             `直接把被除數${place(c)}的 ${digit} 移下來。`;
+          concept = "剛好減完，零不用寫；直接把被除數的下一位移下來。";
+          work = `${prev.partial} − ${prev.product} 剛好減完；紅圈是被除數的${place(c)}。`;
         } else {
           hint =
             `把被除數${place(c)}的 ${digit} 直直往下移，寫在差 ${diff} 的右邊，變成 ${newPartial}。`;
+          concept = "把被除數的下一位（紅圈）直直往下移，寫在差的右邊。";
+          work = `上面剩下 ${diff}；紅圈是被除數的${place(c)}，移下來接在 ${diff} 的右邊。`;
         }
         addStep({
           kind: "bring",
@@ -626,10 +975,13 @@
           col: c,
           expected: digit,
           divisor,
+          digits: ds,
+          prevQ: q,
           phase: `移下來·${place(c)}`,
           prompt: "把下一位移下來",
           question: `被除數${place(c)}的數字移下來，藍框寫幾？`,
           hint,
+          hints: [concept, work, hint],
           highlights: [{ row: dvRow, col: c }],
         });
         if (prev.type === "diffZero") pStart = c;
@@ -681,21 +1033,26 @@
       const c = width - 1 - k;
       const digit = pd[pd.length - 1 - k];
       const lastDigit = k === pd.length - 1;
+      const hint =
+        `${divisor} × ${Q} = ${P}，這格寫 ${digit}。` +
+        (lastDigit && R === 0 ? `積 ${P} 就是被除數 ${dividend}，整除，算對了！` : "");
       addStep({
         kind: "check-mul",
         row: mulRow,
         col: c,
+        k,
         expected: digit,
         divisor,
         quotient: Q,
         phase: `驗算·${place(c)}：除數 × 商`,
         prompt: "驗算：除數 × 商 + 餘數 = 被除數",
         question: `驗算：${divisor} × ${Q} = ？${place(c)}寫幾？`,
-        hint:
-          `${divisor} × ${Q} = ${P}，這格寫 ${digit}。` +
-          (lastDigit && R === 0
-            ? `積 ${P} 就是被除數 ${dividend}，整除，算對了！`
-            : ""),
+        hint,
+        hints: [
+          "驗算先算除數 × 商：從個位開始一位一位乘，滿十要進位到左邊那一位。",
+          checkMulWork(divisor, Q),
+          hint,
+        ],
         highlights: [],
       });
     }
@@ -706,19 +1063,26 @@
       for (let k = 0; k < dd.length; k++) {
         const c = width - 1 - k;
         const digit = dd[dd.length - 1 - k];
+        const hint =
+          `${P} + ${R} = ${dividend}，這格寫 ${digit}。` +
+          (k === dd.length - 1 ? `和被除數 ${dividend} 一樣，表示除法算對了！` : "");
         addStep({
           kind: "check-add",
           row: addRowIdx,
           col: c,
+          k,
           expected: digit,
           product: P,
           remainder: R,
           phase: `驗算·${place(c)}：再加餘數`,
           prompt: "驗算：除數 × 商 + 餘數 = 被除數",
           question: `驗算：${P} + ${R} = ？${place(c)}寫幾？`,
-          hint:
-            `${P} + ${R} = ${dividend}，這格寫 ${digit}。` +
-            (k === dd.length - 1 ? `和被除數 ${dividend} 一樣，表示除法算對了！` : ""),
+          hint,
+          hints: [
+            "再把積加上餘數：個位對齊，從個位開始一位一位加，滿十要進位到左邊那一位。",
+            `${P} + ${R} = ${dividend}。`,
+            hint,
+          ],
           highlights: [],
         });
       }
@@ -734,6 +1098,16 @@
     LEVELS,
     FALLBACK,
     VERIFY_MIN_LEVEL,
+    HINT_LEVELS,
+    CHOICE_COUNT,
+    makeRng,
+    shuffle,
+    mulColumns,
+    addColumns,
+    subColumns,
+    errorCandidates,
+    buildChoices,
+    makeChoices,
     digitsOf,
     hasMiddleZero,
     longDivide,

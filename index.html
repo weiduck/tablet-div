@@ -59,12 +59,12 @@
                 <div class="q-main">
                   <p class="phase" id="phaseLabel">商·十位：估商</p>
                   <p class="question" id="questionText">24 裡面有幾個 8？</p>
-                  <div class="feedback" id="feedback" role="status"></div>
+                  <div class="feedback" id="feedback" role="status" aria-live="polite"></div>
                 </div>
-                <div class="keypad" id="keypad" role="group" aria-label="數字鍵"></div>
+                <div class="choices" id="choices" role="group" aria-label="答案選項"></div>
                 <div class="q-hint">
                   <div class="hint-box" id="hintBox"></div>
-                  <button type="button" class="hint-btn" id="hintBtn">給我一個提示</button>
+                  <button type="button" class="hint-btn" id="hintBtn" aria-controls="hintBox" aria-expanded="false">給我一個提示</button>
                 </div>
               </div>
             </div>
@@ -83,7 +83,7 @@
           </div>
         </div>
       </div>
-      <p class="footer-note" id="footerNote">每個題型會隨機出題。用數字鍵填藍框；點錯沒關係，可以再按一次。</p>
+      <p class="footer-note" id="footerNote">每個題型會隨機出題。從四個選項選一個填進藍框；點錯沒關係，可以再選一次。</p>
     </section>
   </div>
   <script src="div-core.js"></script>

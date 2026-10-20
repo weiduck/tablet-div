@@ -1,6 +1,6 @@
 /**
- * 直式除法練習：介面（點選數字鍵，一格一格填）
- * 純邏輯（出題、題型約束、步驟引擎）在 div-core.js（window.DivCore）。
+ * 直式除法練習：介面（四選一，一格一格填）
+ * 純邏輯（出題、題型約束、步驟引擎、選項與提示）在 div-core.js（window.DivCore）。
  */
 (function () {
   "use strict";
@@ -20,7 +20,9 @@
     cidx: 0,
     checkDone: false,
     values: {},
-    hintOpen: false,
+    hintLevel: 0, // 0 = 收起；1–3 = 已打開到第幾層
+    wrongCount: 0, // 同一步點錯幾次
+    why: {}, // 錯的選項 → 錯因回饋
     locked: false,
     wrongFlash: null,
     lastProblem: "",
@@ -94,21 +96,6 @@
         startProblem(state.level);
       });
       seg.appendChild(btn);
-    });
-  }
-
-  function renderKeypad() {
-    const pad = $("keypad");
-    pad.innerHTML = "";
-    [1, 2, 3, 4, 5, 6, 7, 8, 9, 0].forEach((n) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "key";
-      btn.dataset.digit = String(n);
-      btn.textContent = String(n);
-      btn.setAttribute("aria-label", `數字 ${n}`);
-      btn.addEventListener("click", () => onDigit(n, btn));
-      pad.appendChild(btn);
     });
   }
 
@@ -293,13 +280,61 @@
   }
 
   // ---------- 步驟區 ----------
-  function setHint(step) {
+  /** 提示框顯示第 1 層到目前這一層；按鈕標示「提示 n/3」 */
+  function renderHint() {
+    const step = currentStep();
     const hintBox = $("hintBox");
-    hintBox.textContent = step ? step.hint : "";
-    hintBox.classList.toggle("show", state.hintOpen && !!step);
     const hintBtn = $("hintBtn");
-    hintBtn.textContent = state.hintOpen ? "收起提示" : "給我一個提示";
-    hintBtn.classList.toggle("active", state.hintOpen);
+    const L = Core.HINT_LEVELS;
+    const level = step ? state.hintLevel : 0;
+    hintBox.innerHTML = "";
+    if (level > 0) {
+      step.hints.slice(0, level).forEach((text, i) => {
+        const p = document.createElement("p");
+        p.className = "hint-line";
+        const tag = document.createElement("span");
+        tag.className = "hint-tag";
+        tag.textContent = `提示 ${i + 1}/${L}`;
+        p.appendChild(tag);
+        p.appendChild(document.createTextNode(text));
+        hintBox.appendChild(p);
+      });
+    }
+    hintBox.classList.toggle("show", level > 0);
+    if (level === 0) hintBtn.textContent = "給我一個提示";
+    else if (level < L) hintBtn.textContent = `提示 ${level}/${L}・再給一個提示`;
+    else hintBtn.textContent = `提示 ${level}/${L}・收起提示`;
+    hintBtn.classList.toggle("active", level > 0);
+    hintBtn.setAttribute("aria-expanded", level > 0 ? "true" : "false");
+  }
+
+  /** 步驟區放不下時（直向、打開多層提示），把提示框捲進畫面 */
+  function revealHint() {
+    const panel = $("stepPanel");
+    const box = $("hintBox");
+    if (!box.classList.contains("show")) return;
+    window.requestAnimationFrame(() => {
+      const a = panel.getBoundingClientRect();
+      const r = box.getBoundingClientRect();
+      if (r.bottom > a.bottom) panel.scrollTop += r.bottom - a.bottom + 8;
+    });
+  }
+
+  /** 四選一（div-core 算好的常見錯誤當誘答） */
+  function renderChoices(step) {
+    const box = $("choices");
+    box.innerHTML = "";
+    const built = Core.buildChoices(step);
+    state.why = built.why;
+    built.values.forEach((n) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "choice";
+      btn.dataset.value = String(n);
+      btn.textContent = String(n);
+      btn.addEventListener("click", () => onChoose(n, btn));
+      box.appendChild(btn);
+    });
   }
 
   function totalSteps() {
@@ -332,31 +367,41 @@
     const fb = $("feedback");
     fb.className = "feedback";
     fb.textContent = "";
-    setHint(step);
-    document.querySelectorAll(".key").forEach((k) => {
-      k.disabled = false;
-      k.classList.remove("wrong", "correct");
-    });
+    state.wrongCount = 0;
+    renderHint();
+    renderChoices(step);
     state.locked = false;
     state.wrongFlash = null;
     renderBoard();
   }
 
-  function onDigit(n, btn) {
+  function onChoose(n, btn) {
     if (state.locked) return;
     const step = currentStep();
-    if (!step) return;
-    btn = btn || document.querySelector(`.key[data-digit="${n}"]`);
+    if (!step || !btn || btn.disabled) return;
     const fb = $("feedback");
 
     if (n !== step.expected) {
+      btn.classList.add("wrong");
+      btn.disabled = true; // 同一個錯的選項不用再點
+      state.wrongCount += 1;
       fb.className = "feedback show wrong";
-      fb.textContent = Core.feedbackFor(step, n);
-      $("footerNote").textContent = "按錯沒關係，可以再按一次；需要的話點「給我一個提示」。";
-      if (btn) {
-        btn.classList.add("wrong");
-        later(() => btn.classList.remove("wrong"), WRONG_FLASH_MS);
+      fb.textContent = state.why[n] || Core.feedbackFor(step, n);
+      // 錯 2 次：自動打開第 2 層提示（已打開就再往下一層）；錯 3 次：第 3 層＋框出正確選項
+      if (state.wrongCount >= 2) {
+        state.hintLevel = Math.min(
+          Core.HINT_LEVELS,
+          Math.max(state.hintLevel + 1, state.wrongCount)
+        );
+        renderHint();
+        revealHint();
       }
+      if (state.wrongCount >= 3) {
+        const right = document.querySelector(`.choice[data-value="${step.expected}"]`);
+        if (right) right.classList.add("suggest");
+      }
+      $("footerNote").textContent = "點錯沒關係，可以再選一次；需要的話點「給我一個提示」。";
+      // 直式板上的藍框閃一下錯的數字
       state.wrongFlash = n;
       renderBoard();
       const flashedStep = step;
@@ -372,8 +417,9 @@
     state.locked = true;
     state.wrongFlash = null;
     state.values[stepKey(step)] = n;
-    if (btn) btn.classList.add("correct");
-    document.querySelectorAll(".key").forEach((k) => (k.disabled = true));
+    btn.classList.remove("suggest");
+    btn.classList.add("correct");
+    document.querySelectorAll(".choice").forEach((el) => (el.disabled = true));
     fb.className = "feedback show correct";
     fb.textContent = step.okText || "答對了！";
     renderBoard();
@@ -381,7 +427,7 @@
   }
 
   function advance() {
-    state.hintOpen = false;
+    state.hintLevel = 0;
     if (state.phase === "div") {
       state.idx += 1;
       if (state.idx < state.plan.steps.length) return renderStep();
@@ -399,7 +445,7 @@
   function startCheck() {
     state.phase = "check";
     state.cidx = 0;
-    state.hintOpen = false;
+    state.hintLevel = 0;
     fitBoard();
     renderStep();
   }
@@ -453,12 +499,12 @@
     state.cidx = 0;
     state.checkDone = false;
     state.values = {};
-    state.hintOpen = false;
+    state.hintLevel = 0;
     state.locked = false;
     state.wrongFlash = null;
     $("problemPill").textContent = `${p.dividend} ÷ ${p.divisor} = ?`;
     $("footerNote").textContent =
-      "每個題型會隨機出題。用數字鍵填藍框；點錯沒關係，可以再按一次。";
+      "每個題型會隨機出題。從四個選項選一個填進藍框；點錯沒關係，可以再選一次。";
     syncControls();
     fitBoard();
     renderStep();
@@ -520,19 +566,23 @@
   function init() {
     renderLevelList();
     renderModeSeg();
-    renderKeypad();
 
     $("hintBtn").addEventListener("click", () => {
-      state.hintOpen = !state.hintOpen;
-      setHint(currentStep());
+      if (!currentStep() || state.locked) return;
+      // 0 → 1 → 2 → 3 → 收起 → 1 …
+      state.hintLevel = (state.hintLevel + 1) % (Core.HINT_LEVELS + 1);
+      renderHint();
+      revealHint();
     });
     $("againBtn").addEventListener("click", () => startProblem(state.level));
     $("refreshBtn").addEventListener("click", () => startProblem(state.level));
     $("verifyBtn").addEventListener("click", toggleVerify);
 
-    // 實體鍵盤（外接鍵盤或電腦測試）
+    // 實體鍵盤（外接鍵盤或電腦測試）：按數字＝點同數字的選項
     document.addEventListener("keydown", (e) => {
-      if (/^[0-9]$/.test(e.key)) onDigit(Number(e.key));
+      if (!/^[0-9]$/.test(e.key)) return;
+      const btn = document.querySelector(`.choice[data-value="${e.key}"]`);
+      if (btn) onChoose(Number(e.key), btn);
     });
 
     installScrollGuards();

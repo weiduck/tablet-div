@@ -558,40 +558,46 @@ button {
   line-height: 1.35;
 }
 
-/* 0–9 數字鍵 */
-.keypad {
+/* 四選一（2×2；與直式乘法練習相同） */
+.choices {
   display: grid;
-  grid-template-columns: repeat(5, minmax(var(--tap-min), 1fr));
-  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
-.key {
-  min-height: 60px;
-  min-width: var(--tap-min);
+.choice {
+  min-height: var(--tap-min);
   border: 3px solid var(--navy);
   border-radius: 14px;
   background: #dff0fa;
-  font-size: 1.8rem;
+  color: var(--navy);
+  font-size: 1.6rem;
   font-weight: 900;
   box-shadow: 3px 3px 0 var(--navy);
   transition: transform 0.05s ease;
 }
 
-.key:active:not(:disabled) {
+.choice:active:not(:disabled) {
   transform: translate(2px, 2px);
   box-shadow: 1px 1px 0 var(--navy);
 }
 
-.key.wrong {
+.choice.wrong {
   background: var(--wrong);
 }
 
-.key.correct {
+.choice.correct {
   background: var(--correct);
 }
 
-.key:disabled {
+.choice:disabled {
   cursor: default;
+}
+
+/* 錯 3 次後輕輕框出正確選項 */
+.choice.suggest {
+  outline: 4px dashed var(--cell-filled-border);
+  outline-offset: 3px;
 }
 
 .feedback {
@@ -639,6 +645,24 @@ button {
 
 .hint-box.show {
   display: block;
+}
+
+.hint-line {
+  margin: 0;
+}
+
+.hint-line + .hint-line {
+  margin-top: 6px;
+}
+
+.hint-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #f3dc8a;
+  font-size: 0.8rem;
+  font-weight: 900;
 }
 
 .hint-btn,
@@ -732,7 +756,7 @@ button {
   display: none !important;
 }
 
-/* —— 直向（iPad portrait）：直式板在上、步驟＋數字鍵在下 —— */
+/* —— 直向（iPad portrait）：直式板在上、步驟＋選項在下 —— */
 @media (orientation: portrait), (max-width: 760px) {
   .split {
     display: flex;
@@ -758,12 +782,9 @@ button {
   .q-main {
     grid-area: main;
   }
-  .keypad {
+  .choices {
     grid-area: pad;
-    grid-template-columns: repeat(5, 64px);
-  }
-  .key {
-    min-height: 64px;
+    grid-template-columns: repeat(2, 96px);
   }
   .q-hint {
     grid-area: hint;
@@ -783,14 +804,14 @@ button {
   }
 }
 
-/* 很窄的直向（手機）：數字鍵改到題目下方 */
+/* 很窄的直向（手機）：選項改到題目下方 */
 @media (max-width: 600px) {
   .question-box {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "main" "pad" "hint";
   }
-  .keypad {
-    grid-template-columns: repeat(5, minmax(48px, 1fr));
+  .choices {
+    grid-template-columns: 1fr 1fr;
   }
   .seg {
     margin-left: 0;
@@ -812,8 +833,8 @@ button {
   .question {
     font-size: clamp(1.05rem, 2.2vw, 1.3rem);
   }
-  .key {
-    min-height: 58px;
+  .choice {
+    font-size: 1.4rem;
   }
   .footer-note {
     display: none;
@@ -867,10 +888,6 @@ button {
   }
   .question {
     margin-bottom: 6px;
-  }
-  .key {
-    min-height: var(--tap-min);
-    font-size: 1.6rem;
   }
   .hint-btn,
   .primary-btn {

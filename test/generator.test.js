@@ -223,9 +223,174 @@ check("check steps (驗算)", () => {
   assert.strictEqual(c2.rows.length, 1);
 });
 
+// ---------- 四選一與三層提示 ----------
+/** 這一層提示有沒有「說出要寫幾」 */
+function revealsAnswer(text, ans) {
+  return (
+    new RegExp(`(寫|商|填)\\s*${ans}(?![0-9])`).test(text) || /這格|剛剛好/.test(text)
+  );
+}
+
+function verifyChoicesAndHints(steps, seed, tag) {
+  steps.forEach((s, i) => {
+    const where = `${tag} step ${i} (${s.kind})`;
+    const built = Core.buildChoices(s, Core.makeRng(seed + i));
+    const v = built.values;
+    assert.strictEqual(v.length, 4, `${where}: 4 options`);
+    assert.strictEqual(new Set(v).size, 4, `${where}: distinct ${v}`);
+    v.forEach((x) => assert.ok(Number.isInteger(x) && x >= 0 && x <= 9, `${where}: digit ${x}`));
+    assert.ok(v.includes(s.expected), `${where}: includes answer ${s.expected}`);
+    assert.ok(!(s.expected in built.tags), `${where}: answer not tagged as error`);
+    Object.keys(built.why).forEach((k) => assert.ok(built.why[k], `${where}: why text`));
+    // 同一個 seed → 同樣的選項（含順序）
+    const again = Core.buildChoices(s, Core.makeRng(seed + i));
+    assert.deepStrictEqual(again.values, v, `${where}: same seed same options`);
+    // 三層提示
+    assert.ok(Array.isArray(s.hints) && s.hints.length === Core.HINT_LEVELS, `${where}: 3 hints`);
+    s.hints.forEach((h) => assert.ok(typeof h === "string" && h.length > 0, `${where}: hint text`));
+    assert.ok(!/[0-9０-９]/.test(s.hints[0]), `${where}: level 1 has numerals: ${s.hints[0]}`);
+    assert.ok(!revealsAnswer(s.hints[0], s.expected), `${where}: level 1 reveals answer`);
+    assert.ok(!revealsAnswer(s.hints[1], s.expected), `${where}: level 2 reveals answer: ${s.hints[1]}`);
+    assert.ok(s.hints[2].includes(String(s.expected)), `${where}: level 3 gives answer`);
+  });
+}
+
+const choiceStats = {};
+Core.LEVELS.forEach((L) => {
+  MODES.forEach((mode) => {
+    check(`choices/hints ${L.tag} / ${mode}`, () => {
+      const rng = Core.makeRng(1000 + L.id * 10 + MODES.indexOf(mode));
+      for (let i = 0; i < 150; i++) {
+        const { dividend, divisor } = Core.generate(L.id, mode, rng);
+        const tag = `${dividend}÷${divisor}`;
+        const plan = Core.buildSteps(dividend, divisor);
+        verifyChoicesAndHints(plan.steps, i * 97, tag);
+        if (L.id >= Core.VERIFY_MIN_LEVEL) {
+          verifyChoicesAndHints(Core.buildCheckSteps(dividend, divisor).steps, i * 89, `${tag} 驗算`);
+        }
+        plan.steps.forEach((s) => {
+          const t = Core.buildChoices(s, rng).tags;
+          Object.values(t).forEach((k) => (choiceStats[k] = (choiceStats[k] || 0) + 1));
+        });
+      }
+    });
+  });
+});
+
+check("generate is reproducible with a seeded rng", () => {
+  const a = Core.generate(7, "any", Core.makeRng(42));
+  const b = Core.generate(7, "any", Core.makeRng(42));
+  assert.deepStrictEqual(a, b);
+});
+
+check("correct option position varies with seed", () => {
+  const step = Core.buildSteps(86, 21).steps[0];
+  const positions = new Set();
+  for (let seed = 0; seed < 40; seed++) {
+    positions.add(Core.buildChoices(step, Core.makeRng(seed)).values.indexOf(4));
+  }
+  assert.strictEqual(positions.size, 4, `positions ${[...positions]}`);
+});
+
+/** 找出某題某一步的選項與錯誤類型 */
+function choicesAt(D, d, pick, check) {
+  const plan = check ? Core.buildCheckSteps(D, d) : Core.buildSteps(D, d);
+  const step = plan.steps.find(pick);
+  assert.ok(step, `step not found in ${D}÷${d}`);
+  return { step, built: Core.buildChoices(step, Core.makeRng(7)) };
+}
+
+check("86÷21 商: 3 太小、5 太大", () => {
+  const { built } = choicesAt(86, 21, (s) => s.kind === "quotient");
+  assert.ok(built.values.includes(4));
+  assert.strictEqual(built.tags[3], "small");
+  assert.strictEqual(built.tags[5], "big");
+  assert.ok(/太小了：相減後的差會 ≥ 除數/.test(built.why[3]), built.why[3]);
+  assert.ok(/太大了：積會比被除的數大/.test(built.why[5]), built.why[5]);
+});
+
+check("500÷32 商 5：用 30 估會估成 6（估商誘答）", () => {
+  const { built } = choicesAt(500, 32, (s) => s.kind === "quotient" && s.partial === 180);
+  assert.strictEqual(built.tags[6], "estimate");
+  assert.ok(/看成 30/.test(built.why[6]) && /太大/.test(built.why[6]), built.why[6]);
+});
+
+check("245÷8 最高位：只看第一位的 0", () => {
+  const { built } = choicesAt(245, 8, (s) => s.kind === "quotient" && s.lead);
+  assert.strictEqual(built.tags[0], "first-digit");
+});
+
+check("2453÷8 商中間 0：有「忘了商 0 佔位」的非 0 選項", () => {
+  const { step, built } = choicesAt(2453, 8, (s) => s.kind === "quotient" && s.expected === 0);
+  const skip = Object.keys(built.tags).find((k) => built.tags[k] === "skip-zero");
+  assert.ok(skip !== undefined, JSON.stringify(built.tags));
+  assert.strictEqual(Number(skip), 6, "skip-zero offers the next quotient digit 6");
+  assert.ok(/商 0 佔位/.test(built.why[skip]));
+  assert.strictEqual(step.hints[0].includes("0"), false);
+});
+
+check("500÷32 差 18：借位錯誤", () => {
+  // 50 − 32：個位 0 不夠減 2 → 倒過來減 2、寫 0；十位被借走沒減 1 → 2
+  const ones = choicesAt(500, 32, (s) => s.kind === "diff" && s.partial === 50 && s.k === 0).built;
+  assert.ok(ones.values.includes(8));
+  assert.strictEqual(ones.tags[2], "swap");
+  assert.strictEqual(ones.tags[0], "zero-cant");
+  const tens = choicesAt(500, 32, (s) => s.kind === "diff" && s.partial === 50 && s.k === 1).built;
+  assert.ok(tens.values.includes(1));
+  assert.strictEqual(tens.tags[2], "borrow-not-reduced");
+  assert.ok(/借走 1/.test(tens.why[2]));
+});
+
+check("500÷32 積 160：進位錯誤", () => {
+  // 5 × 32：十位 5×3=15，加進位 1 → 6；忘了進位 5、進位加兩次 7
+  const { built } = choicesAt(500, 32, (s) => s.kind === "product" && s.q === 5 && s.k === 1);
+  assert.ok(built.values.includes(6));
+  assert.strictEqual(built.tags[5], "forgot-carry");
+  assert.strictEqual(built.tags[7], "carry-twice");
+  assert.ok(/忘了加進位 1/.test(built.why[5]));
+});
+
+check("2453÷8 積 24：寫成十位數字", () => {
+  const { built } = choicesAt(2453, 8, (s) => s.kind === "product" && s.q === 3 && s.k === 0);
+  assert.strictEqual(built.tags[2], "tens-digit");
+});
+
+check("6820÷20 移下來：鄰近的被除數數字", () => {
+  const { built } = choicesAt(6820, 20, (s) => s.kind === "bring" && s.col === 2);
+  assert.ok(built.values.includes(2));
+  assert.strictEqual(built.tags[0], "next-digit");
+  assert.strictEqual(built.tags[8], "used-digit");
+});
+
+check("1900÷18 驗算：乘法與加法的進位錯誤", () => {
+  // 18 × 105：個位 8×5 = 40 寫 0 進位 4；十位 1×5 + 8×0 = 5，加進位 4 = 9
+  const mul = choicesAt(1900, 18, (s) => s.kind === "check-mul" && s.k === 1, true).built;
+  assert.ok(mul.values.includes(9));
+  assert.strictEqual(mul.tags[5], "forgot-carry");
+  assert.strictEqual(mul.tags[3], "carry-twice");
+  // 1890 + 10：十位 9 + 1 = 10 → 寫 0、進位 1；百位 8 + 進位 1 = 9
+  const add = choicesAt(1900, 18, (s) => s.kind === "check-add" && s.k === 2, true).built;
+  assert.ok(add.values.includes(9));
+  assert.strictEqual(add.tags[8], "forgot-carry");
+});
+
+check("hints: level 1 concept, level 3 answer (examples)", () => {
+  const s = Core.buildSteps(86, 21).steps[0];
+  assert.ok(/估商/.test(s.hints[0]));
+  assert.ok(/21 看成 20/.test(s.hints[1]) && !revealsAnswer(s.hints[1], 4));
+  assert.ok(/商 4 剛剛好/.test(s.hints[2]));
+});
+
 // ---------- 結果 ----------
 console.log("直式除法 generator test");
 console.log(summary.map((s) => "  " + s).join("\n"));
+console.log(
+  "  誘答類型：" +
+    Object.keys(choiceStats)
+      .sort()
+      .map((k) => `${k}=${choiceStats[k]}`)
+      .join(" ")
+);
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {
   console.log("\nFAILURES:\n  " + failures.join("\n  "));
